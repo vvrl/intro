@@ -6,7 +6,6 @@ from torch.utils.data import Dataset, DataLoader
 import cv2
 import os
 import json
-import random
 import numpy as np
 
 
