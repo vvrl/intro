@@ -7,6 +7,7 @@ import cv2
 import os
 import json
 import numpy as np
+from torchvision import models
 
 
 
@@ -48,10 +49,6 @@ class IntroClipDataset(Dataset):
     def _prepare_clips(self):
     
         for video, info in self.annotations.items():
-            if video != "-220020068_456255339":
-                continue
-
-            print(info['name'])
             video_path = os.path.join(self.video_dir, video, video + ".mp4")
             cap = cv2.VideoCapture(video_path)
             fps = cap.get(cv2.CAP_PROP_FPS)
@@ -64,7 +61,7 @@ class IntroClipDataset(Dataset):
 
             # создаём клипы по всему видео
             for start in range(0, total_frames - self.clip_len, self.stride):
-                end = start + self.clip_len
+                # end = start + self.clip_len
                 label = 1 if intro_start_f <= start < intro_end_f else 0
                 self.clips.append({
                     "video": video_path,
@@ -74,8 +71,7 @@ class IntroClipDataset(Dataset):
                 })
 
             cap.release()
-            if video == "-220020068_456255339":
-                break
+            break
 
     def __len__(self):
         return len(self.clips)
@@ -91,9 +87,23 @@ class IntroClipDataset(Dataset):
             ret, frame = cap.read()
             if not ret:
                 break
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             frame = cv2.resize(frame, self.resize)
             frame = frame / 255.0  # нормализация [0, 1]
             frames.append(frame)
+
+        # for i in range(self.clip_len):
+        #     # Берем кадр на секунде i: смещение по времени = i секунд
+        #     frame_number = item["start"] + int(i * item["fps"])
+        #     cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
+        #     ret, frame = cap.read()
+        #     if not ret:
+        #         break
+        
+        #     frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        #     frame = cv2.resize(frame, self.resize)
+        #     frame = frame / 255.0  # нормализация [0, 1]
+        #     frames.append(frame)
 
         cap.release()
 
@@ -129,8 +139,31 @@ for clips, labels in loader:
     print(labels)
     for i in range(clips.shape[0]):
         show_clip(clips[i], labels[i])
+    break
     
     
 
-    
+class MyModel(torch.nn.Module):
+    def __init__(self, num_classes=2):
+        super(MyModel, self).__init__()
+        resnet = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V2)
+        self.cnn = torch.nn.Sequential(*list(resnet.children())[:-1]) 
 
+        for param in self.cnn.parameters():
+            param.requires_grad = False
+
+        self.lstm = torch.nn.LSTM(input_size=2048, hidden_size=512, num_layers=2, batch_first=True, bidirectional=True)
+
+        self.fc = torch.nn.Linear(512 * 2, num_classes)
+
+    def forward(self, x):
+        batch_size, channels, time, height, width = x.size()
+        x = x.view(batch_size * time, channels, height, width)
+        x = self.cnn(x)
+        x = x.view(batch_size, time, -1)
+        x, _ = self.lstm(x)
+        x = self.fc(x)
+        return x 
+
+
+model = MyModel()
